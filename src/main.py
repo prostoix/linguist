@@ -2,8 +2,12 @@ import asyncio
 import logging
 import os
 import json
+import sys
 from aio_pika import connect, Message, DeliveryMode
 from aio_pika.abc import AbstractIncomingMessage
+
+# Добавляем путь к модулям
+sys.path.append('/app/src')
 
 # Настройка логирования
 logging.basicConfig(
@@ -12,8 +16,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("linguist")
 
-from src.services.speech_client import SaluteSpeechClient
+# Импортируем после добавления пути
+try:
+    from services.speech_client import SaluteSpeechClient
+    logger.info("✅ Модули успешно импортированы")
+except ImportError as e:
+    logger.error(f"❌ Ошибка импорта: {e}")
+    logger.info("Содержимое /app/src:")
+    import subprocess
+    result = subprocess.run(['find', '/app/src', '-type', 'f'], capture_output=True, text=True)
+    logger.info(result.stdout)
+    raise
 
+# Остальной код остается без изменений...
 async def process_audio_message(message: AbstractIncomingMessage, channel, speech_client):
     """Обработка аудио сообщения"""
     try:
