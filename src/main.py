@@ -12,35 +12,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("linguist")
 
-class SaluteSpeechClient:
-    async def recognize_audio(self, audio_data: bytes, audio_format: str = "wav") -> str:
-        """Заглушка для распознавания аудио"""
-        logger.info(f"🔊 Вызов SaluteSpeech API: {len(audio_data)} байт, формат: {audio_format}")
-        
-        # Имитация обработки
-        await asyncio.sleep(2)
-        
-        # Тестовый распознанный текст
-        recognized_text = "Это тестовый распознанный текст. В реальности здесь будет вызов SaluteSpeech API."
-        
-        logger.info(f"📝 Результат распознавания: {recognized_text}")
-        return recognized_text
+from src.services.speech_client import SaluteSpeechClient
 
-async def process_audio_message(message: AbstractIncomingMessage, channel):
+async def process_audio_message(message: AbstractIncomingMessage, channel, speech_client):
     """Обработка аудио сообщения"""
     try:
         data = json.loads(message.body.decode())
-        logger.info(f"🎵 Начинаем обработку аудио: {data.get('filename')}")
+        filename = data.get('filename', 'unknown')
+        logger.info(f"🎵 Начинаем обработку аудио: {filename}")
         
         # Извлекаем аудио данные
         audio_data_hex = data.get('audio_data')
         audio_bytes = bytes.fromhex(audio_data_hex)
         
-        # Распознаем аудио
-        speech_client = SaluteSpeechClient()
+        # Распознаем аудио через REAL SaluteSpeech
         recognized_text = await speech_client.recognize_audio(audio_bytes, data.get('format', 'wav'))
         
         # Формируем ответ
+        from datetime import datetime
         response_message = {
             "type": "recognized_text",
             "original_message": {
@@ -49,7 +38,7 @@ async def process_audio_message(message: AbstractIncomingMessage, channel):
                 "filename": data.get('filename')
             },
             "recognized_text": recognized_text,
-            "processing_timestamp": "2025-11-30T16:44:40",
+            "processing_timestamp": datetime.now().isoformat(),
             "additional_tag": data.get('additional_tag')
         }
         
@@ -61,7 +50,7 @@ async def process_audio_message(message: AbstractIncomingMessage, channel):
                 content_type="application/json",
                 delivery_mode=DeliveryMode.PERSISTENT
             ),
-            routing_key="text"  # Отправляем информатору
+            routing_key="text"
         )
         
         # Подтверждаем обработку
@@ -73,9 +62,31 @@ async def process_audio_message(message: AbstractIncomingMessage, channel):
         await message.nack(requeue=False)
 
 async def main():
-    logger.info("🚀 Запуск Ленгвиста...")
+    logger.info("🚀 Запуск Ленгвиста с REAL SaluteSpeech OAuth...")
     
     try:
+        # Инициализация SaluteSpeech клиента с OAuth
+        client_id = os.getenv("SALUTE_SPEECH_CLIENT_ID")
+        client_secret = os.getenv("SALUTE_SPEECH_CLIENT_SECRET")
+        scope = os.getenv("SALUTE_SPEECH_SCOPE", "salutespeech")
+        
+        if not client_id or not client_secret:
+            logger.error("❌ Не заданы SALUTE_SPEECH_CLIENT_ID или SALUTE_SPEECH_CLIENT_SECRET")
+            return
+        
+        speech_client = SaluteSpeechClient(client_id, client_secret, scope)
+        
+        # Получаем первый токен
+        await speech_client._get_access_token()
+        
+        # Проверка доступности SaluteSpeech
+        if await speech_client.health_check():
+            logger.info("✅ SaluteSpeech доступен")
+        else:
+            logger.error("❌ SaluteSpeech недоступен")
+            return
+        
+        # Подключение к RabbitMQ
         rabbitmq_url = os.getenv("RABBITMQ_URL", "amqp://guest:guest@192.168.1.137/")
         logger.info(f"🔗 Подключаемся к RabbitMQ: {rabbitmq_url}")
         
@@ -83,22 +94,16 @@ async def main():
         channel = await connection.channel()
         await channel.set_qos(prefetch_count=1)
         
-        # Объявляем очередь
+        # Объявляем очередь и обменник
         queue = await channel.declare_queue("to_linguist", durable=True)
+        exchange = await channel.declare_exchange("message_router", type="direct", durable=True)
         
-        # Объявляем обменник (должен совпадать с роутером)
-        exchange = await channel.declare_exchange(
-            "message_router", 
-            type="direct",
-            durable=True
-        )
-        
-        logger.info("✅ RabbitMQ подключен успешно!")
+        logger.info("✅ Все сервисы подключены!")
         logger.info("🎧 Начинаем слушать сообщения...")
         
         # Обработчик сообщений
         async def on_message(message):
-            await process_audio_message(message, channel)
+            await process_audio_message(message, channel, speech_client)
         
         await queue.consume(on_message)
         
