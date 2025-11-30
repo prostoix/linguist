@@ -6,9 +6,6 @@ import sys
 from aio_pika import connect, Message, DeliveryMode
 from aio_pika.abc import AbstractIncomingMessage
 
-# Добавляем путь к модулям
-sys.path.append('/app/src')
-
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -16,6 +13,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("linguist")
 
+# Импортируем из services
 from services.speech_client import SaluteSpeechClient
 
 async def process_audio_message(message: AbstractIncomingMessage, channel, speech_client):
