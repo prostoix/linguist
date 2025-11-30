@@ -16,19 +16,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("linguist")
 
-# Импортируем после добавления пути
-try:
-    from services.speech_client import SaluteSpeechClient
-    logger.info("✅ Модули успешно импортированы")
-except ImportError as e:
-    logger.error(f"❌ Ошибка импорта: {e}")
-    logger.info("Содержимое /app/src:")
-    import subprocess
-    result = subprocess.run(['find', '/app/src', '-type', 'f'], capture_output=True, text=True)
-    logger.info(result.stdout)
-    raise
+from services.speech_client import SaluteSpeechClient
 
-# Остальной код остается без изменений...
 async def process_audio_message(message: AbstractIncomingMessage, channel, speech_client):
     """Обработка аудио сообщения"""
     try:
@@ -77,28 +66,23 @@ async def process_audio_message(message: AbstractIncomingMessage, channel, speec
         await message.nack(requeue=False)
 
 async def main():
-    logger.info("🚀 Запуск Ленгвиста с REAL SaluteSpeech OAuth...")
+    logger.info("🚀 Запуск Ленгвиста с Authorization Key...")
     
     try:
-        # Инициализация SaluteSpeech клиента с OAuth
-        client_id = os.getenv("SALUTE_SPEECH_CLIENT_ID")
-        client_secret = os.getenv("SALUTE_SPEECH_CLIENT_SECRET")
-        scope = os.getenv("SALUTE_SPEECH_SCOPE", "salutespeech")
+        # Инициализация SaluteSpeech клиента с Authorization Key
+        auth_key = os.getenv("SALUTE_SPEECH_AUTH_KEY")
         
-        if not client_id or not client_secret:
-            logger.error("❌ Не заданы SALUTE_SPEECH_CLIENT_ID или SALUTE_SPEECH_CLIENT_SECRET")
+        if not auth_key:
+            logger.error("❌ Не задан SALUTE_SPEECH_AUTH_KEY")
             return
         
-        speech_client = SaluteSpeechClient(client_id, client_secret, scope)
-        
-        # Получаем первый токен
-        await speech_client._get_access_token()
+        speech_client = SaluteSpeechClient(auth_key)
         
         # Проверка доступности SaluteSpeech
         if await speech_client.health_check():
             logger.info("✅ SaluteSpeech доступен")
         else:
-            logger.error("❌ SaluteSpeech недоступен")
+            logger.error("❌ SaluteSpeech недоступен - проверьте Authorization Key")
             return
         
         # Подключение к RabbitMQ

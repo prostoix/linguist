@@ -8,63 +8,15 @@ import aiohttp
 logger = logging.getLogger("linguist.speech")
 
 class SaluteSpeechClient:
-    """Клиент для SaluteSpeech API с OAuth аутентификацией"""
+    """Клиент для SaluteSpeech API с Authorization Key"""
     
-    def __init__(self, client_id: str, client_secret: str, scope: str):
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.scope = scope
-        self.token_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    def __init__(self, auth_key: str):
+        self.auth_key = auth_key
         self.api_url = "https://smartspeech.sber.ru/rest/v1"
-        self.access_token = None
-        self.token_expires = 0
-    
-    async def _get_access_token(self) -> str:
-        """Получение OAuth токена"""
-        try:
-            # Кодируем client_id:client_secret в base64
-            credentials = base64.b64encode(
-                f"{self.client_id}:{self.client_secret}".encode()
-            ).decode()
-            
-            headers = {
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "application/json"
-            }
-            
-            data = {
-                "scope": self.scope
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.token_url,
-                    headers=headers,
-                    data=data,
-                    ssl=False  # Важно для их самоподписанного сертификата
-                ) as response:
-                    
-                    if response.status == 200:
-                        token_data = await response.json()
-                        self.access_token = token_data.get("access_token")
-                        # Токен живет 1 час, обновляем через 50 минут
-                        self.token_expires = asyncio.get_event_loop().time() + 3000
-                        logger.info("✅ OAuth токен получен успешно")
-                        return self.access_token
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ Ошибка получения токена: {response.status} - {error_text}")
-                        raise Exception(f"Token error: {response.status}")
-                        
-        except Exception as e:
-            logger.error(f"❌ Ошибка аутентификации: {e}")
-            raise
-    
-    async def _ensure_token_valid(self):
-        """Проверка и обновление токена при необходимости"""
-        if not self.access_token or asyncio.get_event_loop().time() >= self.token_expires:
-            await self._get_access_token()
+        self.headers = {
+            "Authorization": f"Bearer {auth_key}",
+            "Content-Type": "application/json"
+        }
     
     async def recognize_audio(self, audio_data: bytes, audio_format: str = "wav") -> str:
         """
@@ -78,8 +30,6 @@ class SaluteSpeechClient:
             Распознанный текст
         """
         try:
-            await self._ensure_token_valid()
-            
             logger.info(f"🔊 Отправка аудио в SaluteSpeech: {len(audio_data)} байт")
             
             # Кодируем аудио в base64
@@ -99,19 +49,14 @@ class SaluteSpeechClient:
                 }
             }
             
-            headers = {
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json"
-            }
-            
             # Отправка запроса
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.api_url}/data:recognize",
-                    headers=headers,
+                    headers=self.headers,
                     json=request_data,
                     timeout=30,
-                    ssl=False  # Для их сертификата
+                    ssl=False
                 ) as response:
                     
                     if response.status == 200:
@@ -126,10 +71,8 @@ class SaluteSpeechClient:
                             return "Текст не распознан"
                     
                     elif response.status == 401:
-                        # Токен протух, пробуем обновить
-                        logger.warning("🔄 Токен истек, обновляем...")
-                        await self._get_access_token()
-                        return await self.recognize_audio(audio_data, audio_format)
+                        logger.error("❌ Неверный Authorization Key")
+                        raise Exception("Invalid Authorization Key")
                     
                     else:
                         error_text = await response.text()
@@ -146,21 +89,14 @@ class SaluteSpeechClient:
     async def health_check(self) -> bool:
         """Проверка доступности SaluteSpeech"""
         try:
-            await self._ensure_token_valid()
-            
-            headers = {
-                "Authorization": f"Bearer {self.access_token}"
-            }
-            
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.api_url}/data:status",
-                    headers=headers,
+                    headers=self.headers,
                     timeout=10,
                     ssl=False
                 ) as response:
                     return response.status == 200
-                    
         except Exception as e:
             logger.error(f"❌ Health check failed: {e}")
             return False
